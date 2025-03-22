@@ -16,3 +16,8 @@ Genotype data in the HLA region on human chromosome 6 (28Mbp - 34Mbp) were extra
 ```bash
 bash anc_infer.bsh
 ```
+
+3. Principal Component Analysis (PCA)
+```bash
+bash pca.bsh
+```
