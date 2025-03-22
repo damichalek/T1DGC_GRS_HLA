@@ -1,0 +1,139 @@
+#!/bin/bash
+
+echo "PCA for ImmunoChip data, Sep 19, 2023, by Dominika Michalek"
+
+PLINK=plink1.9
+KING=king
+logfile=pca.log
+date > $logfile
+
+data=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/release4/processed_for_imputation/topmed_alignment/unrelated
+pca=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/PCA
+pcs=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/PCA/PCs
+temp=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/PCA/Temp
+imp=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/Imputation
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Prepare PCA files for MEGA data (from Cassie)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=1
+
+for anc in AFR EAS EUR FIN; do
+	awk -v file=$pca/mega_pca_b37_pruned_unrelated_${anc}_pca_proj_onto_controls.sscore 'BEGIN{while((getline<file)>0)l[$2]=$0}$2 in l{print $0"\t"l[$2]}' $imp/Filtered_${anc}/chr6.dose.filtered.fam > $temp/tmp${step}_${anc}.txt
+
+	echo "FID IID FA MO SEX AFF PC1 PC2 PC3 PC4 PC5" | sed "s/ /\t/g" > $temp/tmp${step}_${anc}_pc.txt
+	awk '{print $1, $2, $3, $4, $5, $6, $12, $13, $14, $15, $16}' $temp/tmp${step}_${anc}.txt | sed "s/ /\t/g" >> $temp/tmp${step}_${anc}_pc.txt
+
+	cp $temp/tmp${step}_${anc}_pc.txt $pcs/mega_b37_pcs_${anc}.txt
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Remove high LD regions
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=2
+
+# following steps will include only AMR and SAS clusters
+# b37 coordinates obtained from https://genome.sph.umich.edu/wiki/Regions_of_high_linkage_disequilibrium_(LD)
+
+echo "1 48000000 52000000" > $pca/high_LD_regions.txt
+echo "2 86000000 100500000" >> $pca/high_LD_regions.txt
+echo "2 134500000 138000000" >> $pca/high_LD_regions.txt
+echo "2 183000000 190000000" >> $pca/high_LD_regions.txt
+echo "3 47500000 50000000" >> $pca/high_LD_regions.txt
+echo "3 83500000 87000000" >> $pca/high_LD_regions.txt
+echo "3 89000000 97500000" >> $pca/high_LD_regions.txt
+echo "5 44500000 505000000" >> $pca/high_LD_regions.txt
+echo "5 98000000 100500000" >> $pca/high_LD_regions.txt
+echo "5 129000000 132000000" >> $pca/high_LD_regions.txt
+echo "5 135500000 138500000" >> $pca/high_LD_regions.txt
+echo "6 25000000 35000000" >> $pca/high_LD_regions.txt
+echo "6 57000000 64000000" >> $pca/high_LD_regions.txt
+echo "6 140000000 142500000" >> $pca/high_LD_regions.txt
+echo "7 55000000 66000000" >> $pca/high_LD_regions.txt
+echo "8 7000000 13000000" >> $pca/high_LD_regions.txt
+echo "8 43000000 50000000" >> $pca/high_LD_regions.txt
+echo "8 112000000 115000000" >> $pca/high_LD_regions.txt
+echo "10 37000000 43000000" >> $pca/high_LD_regions.txt
+echo "11 46000000 57000000" >> $pca/high_LD_regions.txt
+echo "11 87500000 90500000" >> $pca/high_LD_regions.txt
+echo "12 33000000 40000000" >> $pca/high_LD_regions.txt
+echo "12 109500000 112000000" >> $pca/high_LD_regions.txt
+echo "20 32000000 34500000" >> $pca/high_LD_regions.txt
+
+# add label for each region to ld region file (required format for plink "--exclude range" option)
+awk '{print $1, $2, $3, "R"$NR}' $pca/high_LD_regions.txt > $pca/high_LD_regions_range.txt
+
+for anc in AMR SAS; do
+	$PLINK --bfile $data/${anc}/mega_b37-updated-unrelated-${anc}_cluster --exclude range $pca/high_LD_regions_range.txt --make-bed --out $temp/tmp${step}_${anc}_without_highLD &>> $logfile
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# LD-pruning
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=3
+step2=$((step-1))
+
+# The command below that specifies 50 5 0.2 would 
+# a) consider a window of 50 SNPs, 
+# b) calculate LD between each pair of SNPs in the window, 
+# b) remove one of a pair of SNPs if the LD is greater than 0.2, 
+# c) shift the window 5 SNPs forward and repeat the procedure
+
+for anc in AMR SAS; do
+	$PLINK --bfile $temp/tmp${step2}_${anc}_without_highLD --geno 0.05 --maf 0.01 --indep-pairwise 50 5 0.2 --autosome --biallelic-only strict --make-bed --out $temp/tmp${step}_${anc}_without_highLD_pruning &>> $logfile
+	$PLINK --bfile $temp/tmp${step2}_${anc}_without_highLD --extract $temp/tmp${step}_${anc}_without_highLD_pruning.prune.in --make-bed --out $temp/tmp${step}_${anc}_without_highLD_pruned &>> $logfile
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Run PCA (projection of cases into controls)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=4
+step3=$((step-1))
+
+# QC check if all of the samples are unrelated
+for anc in AMR SAS; do
+	$KING -b $temp/tmp${step3}_${anc}_without_highLD_pruned.bed --unrelated --prefix $temp/tmp${step}_${anc}_without_highLD_pruned &>> $logfile
+done
+
+# get controls
+for anc in AMR SAS; do
+	awk '$NF==1 {print $1, $2}' $temp/tmp${step3}_${anc}_without_highLD_pruned.fam > $temp/tmp${step}_${anc}_controls.txt
+	$PLINK --bfile $temp/tmp${step3}_${anc}_without_highLD_pruned --keep $temp/tmp${step}_${anc}_controls.txt --make-bed --out $temp/tmp${step}_${anc}_without_highLD_pruned_controls &>> $logfile
+done
+
+# calculate principal components in controls
+# Run PCA and save variance weights
+for anc in AMR SAS; do
+	plink2 --bfile $temp/tmp${step}_${anc}_without_highLD_pruned_controls --maf 0.05 --freq --pca var-wts --out $temp/tmp${step}_${anc}_without_highLD_pruned_controls_pca &>> $logfile
+done
+
+# project unrelated subjects onto control PCA space
+# Use --score option for PCA projection
+for anc in AMR SAS; do
+	plink2 --bfile $temp/tmp${step3}_${anc}_without_highLD_pruned --read-freq $temp/tmp${step}_${anc}_without_highLD_pruned_controls_pca.afreq --score $temp/tmp${step}_${anc}_without_highLD_pruned_controls_pca.eigenvec.var 2 3 header-read no-mean-imputation variance-standardize --score-col-nums 5-14 --out $pca/mega_pca_b37_pruned_unrelated_${anc}_pca_proj_onto_controls &>> $logfile
+done
+
+for anc in AMR SAS; do
+	cp $temp/tmp${step}_${anc}_without_highLD_pruned_controls_pca.eigenval $pca/mega_pca_b37_pruned_unrelated_${anc}_controls.eigenval
+	cp $temp/tmp${step}_${anc}_without_highLD_pruned_controls_pca.eigenvec $pca/mega_pca_b37_pruned_unrelated_${anc}_controls.eigenvec
+	cp $temp/tmp${step}_${anc}_without_highLD_pruned_controls_pca.eigenvec.var $pca/mega_pca_b37_pruned_unrelated_${anc}_controls.eigenvec.var
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Prepare PCA files for MEGA data (AMR and SAS)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=5
+
+for anc in AMR SAS; do
+	awk -v file=$pca/mega_pca_b37_pruned_unrelated_${anc}_pca_proj_onto_controls.sscore 'BEGIN{while((getline<file)>0)l[$2]=$0}$2 in l{print $0"\t"l[$2]}' $data/${anc}/mega_b37-updated-unrelated-${anc}_cluster.fam > $temp/tmp${step}_${anc}.txt
+
+	echo "FID IID FA MO SEX AFF PC1 PC2 PC3 PC4 PC5" | sed "s/ /\t/g" > $temp/tmp${step}_${anc}_pc.txt
+	awk '{print $1, $2, $3, $4, $5, $6, $12, $13, $14, $15, $16}' $temp/tmp${step}_${anc}.txt | sed "s/ /\t/g" >> $temp/tmp${step}_${anc}_pc.txt
+
+	cp $temp/tmp${step}_${anc}_pc.txt $pcs/mega_b37_pcs_${anc}.txt
+done
