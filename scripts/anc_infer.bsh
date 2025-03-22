@@ -1,0 +1,59 @@
+#!/bin/bash
+
+echo "Population structure and ancestry inference on released genotyped data (ImmunoChip), Jan 20, 2024, by Dominika Michalek"
+
+PLINK=plink1.9
+KING=king
+logfile=anc_infer.log
+date > $logfile
+
+data=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/release4/processed_for_imputation/topmed_alignment
+unrelated=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/release4/processed_for_imputation/topmed_alignment/unrelated
+ref=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/ancestry_inference/Reference
+temp=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/ancestry_inference/Temp
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Keep unrelated individuals
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=1
+
+$PLINK --bfile $data/mega_b37-updated --keep $unrelated/unrelateds_all.txt --make-bed --out $unrelated/mega_b37-updated-unrelated &>> $logfile
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Project samples into 1000 Genomes reference panel
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=2
+
+$KING -b $ref/KGref,$unrelated/mega_b37-updated-unrelated --mds --proj --rplot --prefix $temp/mega_b37-updated-unrelated >> $logfile
+
+cp $temp/mega_b37-updated-unrelated_ancestryplot.pdf $unrelated/mega_b37-updated-unrelated_ancestryplot.pdf
+cp $temp/mega_b37-updated-unrelated_InferredAncestry.txt $unrelated/mega_b37-updated-unrelated_InferredAncestry.txt
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Separate SAS from AMR cluster
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=3
+
+awk -v file=$data/AMR/mega_b37-updated-chr6_AMR_cluster.fam 'BEGIN{while((getline<file)>0)l[$2]=$0}$2 in l{print $0"\t"l[$2]}' $temp/mega_b37-updated-unrelated_InferredAncestry.txt > $temp/tmp${step}_AMR.txt
+
+# unrelated samples
+awk '{print $1, $2}' $temp/tmp${step}_AMR.txt > $temp/samples_to_keep_AMR_with_SAS.txt
+awk '$9 ~ /SAS/ && $9 !~ /;/ {print $1, $2}' $temp/tmp${step}_AMR.txt > $temp/samples_to_keep_SAS.txt
+
+# unrelated AMR genotyped data (for PCA analysis in PLINK)
+$PLINK --bfile $unrelated/mega_b37-updated-unrelated --keep $temp/samples_to_keep_AMR_with_SAS.txt --make-bed --out $temp/mega_b37-updated-unrelated-AMR_with_SAS_cluster &>> $logfile
+$PLINK --bfile $temp/mega_b37-updated-unrelated-AMR_with_SAS_cluster --remove $temp/samples_to_keep_SAS.txt --make-bed --out $unrelated/AMR/mega_b37-updated-unrelated-AMR_cluster &>> $logfile
+awk '{print $1, $2}' $unrelated/AMR/mega_b37-updated-unrelated-AMR_cluster.fam > $temp/samples_to_keep_AMR.txt
+
+# unrelated SAS genotyped data (for PCA analysis in PLINK)
+$PLINK --bfile $unrelated/mega_b37-updated-unrelated --keep $temp/samples_to_keep_SAS.txt --make-bed --out $unrelated/SAS/mega_b37-updated-unrelated-SAS_cluster &>> $logfile
+
+# unrelated AFR, EAS, EUR and FIN (PCA in PLINK were prepared by Cassie Robertson)
+for anc in AFR EAS EUR FIN; do
+	awk -v file=$data/${anc}/mega_b37-updated-chr6_${anc}_cluster.fam 'BEGIN{while((getline<file)>0)l[$2]=$0}$2 in l{print $0"\t"l[$2]}' $unrelated/mega_b37-updated-unrelated.fam > $temp/tmp${step}_${anc}.txt
+	awk '{print $1, $2}' $temp/tmp${step}_${anc}.txt > $temp/samples_to_keep_${anc}.txt
+	$PLINK --bfile $unrelated/mega_b37-updated-unrelated --keep $temp/samples_to_keep_${anc}.txt --make-bed --out $unrelated/${anc}/mega_b37-updated-unrelated-${anc}_cluster &>> $logfile
+done
