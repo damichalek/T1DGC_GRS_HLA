@@ -1,6 +1,6 @@
 # T1DGC: HLA-focused type 1 diabetes genetic risk prediction in populations of diverse ancestry
 
-This repository contains the steps taken for HLA-focused type 1 diabetes genetic risk prediction in AFR, AMR, EUR and FIN ancestry individuals. </br>
+This repository contains the steps taken for HLA-focused type 1 diabetes genetic risk prediction in Admixed African (AFR), Admixed American (AMR), European (EUR) and Finnish (FIN) ancestry individuals. </br>
 For questions, please contact Dominika Michalek (dam8mt@virginia.edu).
 
 ## Quality control
