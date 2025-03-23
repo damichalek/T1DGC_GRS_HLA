@@ -172,3 +172,108 @@ for anc in AFR AMR EAS EUR FIN; do
 		bcftools index -c $imp/Filtered_${anc}/chr6.dose.filtered.${val}.vcf.gz
 	done
 done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Separate AMR individuals based on continents (AP, NA, EU)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=6
+
+# AP - Asia Pacific, NA - North America, EU - Europe
+
+awk '$1 ~ /T1DGC-AP/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam > $temp/tmp${step}_chr6_AP.txt
+
+awk '$1 ~ /T1DGC-NA/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam > $temp/tmp${step}_chr6_NA.txt
+awk '$1 ~ /SEARCH/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_NA.txt
+awk '$1 ~ /Trialnet/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_NA.txt
+awk '$1 ~ /BRI/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_NA.txt
+awk '$1 ~ /GoKinD/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_NA.txt
+awk '$1 ~ /CLEAR/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_NA.txt
+awk '$1 ~ /EDIC/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_NA.txt
+awk '$1 ~ /UAB/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_NA.txt
+awk '$1 ~ /UCHSC/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_NA.txt
+awk '$1 ~ /UCSF/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_NA.txt
+awk '$1 ~ /NIMH/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_NA.txt
+awk '$1 ~ /NYCP/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_NA.txt
+
+awk '$1 ~ /T1DGC-EUR/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam > $temp/tmp${step}_chr6_EU.txt
+awk '$1 ~ /T1DGC-UK/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_EU.txt
+awk '$1 ~ /T1DGC-YH/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_EU.txt
+awk '$1 ~ /DAN/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_EU.txt
+awk '$1 ~ /GRID/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_EU.txt
+awk '$1 ~ /cbr_controls/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_EU.txt
+awk '$1 ~ /IC_Cases/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_EU.txt
+awk '$1 ~ /UKBS/ {print $1, $2}' $imp/Filtered_AMR/chr6.dose.filtered.fam >> $temp/tmp${step}_chr6_EU.txt
+
+# PLINK format files
+
+for anc in AP NA EU; do
+	$PLINK --bfile $imp/Filtered_AMR/chr6.dose.filtered --keep $temp/tmp${step}_chr6_${anc}.txt --make-bed --out $imp/Filtered_AMR/${anc}/chr6.dose.filtered &>> $logfile
+done
+
+for anc in AP NA EU; do
+for val in HLA AA SNP; do
+	$PLINK --bfile $imp/Filtered_AMR/chr6.dose.filtered.${val} --keep $temp/tmp${step}_chr6_${anc}.txt --make-bed --out $imp/Filtered_AMR/${anc}/chr6.dose.filtered.${val} &>> $logfile
+done
+done
+
+# VCF format files
+
+for anc in AP NA EU; do
+	awk '{print $2}' $temp/tmp${step}_chr6_${anc}.txt > $temp/tmp${step}_chr6_${anc}_ID.txt
+done
+
+for anc in AP NA EU; do
+	bcftools view --samples-file $temp/tmp${step}_chr6_${anc}_ID.txt $imp/Filtered_AMR/chr6.dose.filtered.vcf.gz -o $imp/Filtered_AMR/${anc}/chr6.dose.filtered.vcf.gz -Oz
+	tabix -p vcf $imp/Filtered_AMR/${anc}/chr6.dose.filtered.vcf.gz
+	bcftools index -c $imp/Filtered_AMR/${anc}/chr6.dose.filtered.vcf.gz
+done
+
+for anc in AP NA EU; do
+for val in HLA AA SNP; do
+	bcftools view --samples-file $temp/tmp${step}_chr6_${anc}_ID.txt $imp/Filtered_AMR/chr6.dose.filtered.${val}.vcf.gz -o $imp/Filtered_AMR/${anc}/chr6.dose.filtered.${val}.vcf.gz -Oz
+	tabix -p vcf $imp/Filtered_AMR/${anc}/chr6.dose.filtered.${val}.vcf.gz
+	bcftools index -c $imp/Filtered_AMR/${anc}/chr6.dose.filtered.${val}.vcf.gz
+done
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Separate AMR (AP, NA) individuals to AP Indian and NA Hispanic
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=7
+
+# AP - Asia Pacific, NA - North America
+# Files with FIDs and IIDs were prepared manually based on AMR_full_list.xlsx file in Filtered_AMR folder
+
+# PLINK format files
+
+for anc in AP_Indian NA_Hispanic; do
+	$PLINK --bfile $imp/Filtered_AMR/chr6.dose.filtered --keep $temp/tmp${step}_chr6_${anc}.txt --make-bed --out $imp/Filtered_AMR/${anc}/chr6.dose.filtered &>> $logfile
+done
+
+for anc in AP_Indian NA_Hispanic; do
+for val in HLA AA SNP; do
+	$PLINK --bfile $imp/Filtered_AMR/chr6.dose.filtered.${val} --keep $temp/tmp${step}_chr6_${anc}.txt --make-bed --out $imp/Filtered_AMR/${anc}/chr6.dose.filtered.${val} &>> $logfile
+done
+done
+
+# VCF format files
+
+for anc in AP_Indian NA_Hispanic; do
+	awk '{print $2}' $temp/tmp${step}_chr6_${anc}.txt > $temp/tmp${step}_chr6_${anc}_ID.txt
+done
+
+for anc in AP_Indian NA_Hispanic; do
+	bcftools view --samples-file $temp/tmp${step}_chr6_${anc}_ID.txt $imp/Filtered_AMR/chr6.dose.filtered.vcf.gz -o $imp/Filtered_AMR/${anc}/chr6.dose.filtered.vcf.gz -Oz
+	tabix -p vcf $imp/Filtered_AMR/${anc}/chr6.dose.filtered.vcf.gz
+	bcftools index -c $imp/Filtered_AMR/${anc}/chr6.dose.filtered.vcf.gz
+done
+
+for anc in AP_Indian NA_Hispanic; do
+for val in HLA AA SNP; do
+	bcftools view --samples-file $temp/tmp${step}_chr6_${anc}_ID.txt $imp/Filtered_AMR/chr6.dose.filtered.${val}.vcf.gz -o $imp/Filtered_AMR/${anc}/chr6.dose.filtered.${val}.vcf.gz -Oz
+	tabix -p vcf $imp/Filtered_AMR/${anc}/chr6.dose.filtered.${val}.vcf.gz
+	bcftools index -c $imp/Filtered_AMR/${anc}/chr6.dose.filtered.${val}.vcf.gz
+done
+done
