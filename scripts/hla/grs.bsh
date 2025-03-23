@@ -1,0 +1,206 @@
+#!/bin/bash
+
+echo "GRS Risk Prediction for imputed ImmunoChip data (MAF > 0.005 and R2 > 0.5), Nov 16, 2023, by Dominika Michalek"
+
+PLINK=plink1.9
+KING=king
+logfile=grs.log
+date > $logfile
+
+imp=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/Imputation
+cond=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/association_analysis/conditional_analysis/output
+temp=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/GRS/Temp
+out=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/GRS/output
+
+# Updated version of awk/gawk 5.2
+awkPath=/mnt/t1/local/bin/
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# GRS model (only HLA)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=1
+
+for val in HLA SNP; do
+for anc in AFR AMR EAS EUR FIN; do
+	$PLINK --bfile $imp/Filtered_${anc}/chr6.dose.filtered.${val} --freq --out $temp/tmp${step}_chr6_${anc}_${val} &>> $logfile
+done
+done
+
+# change spaces to tabs in freq files
+for val in HLA SNP; do
+for anc in AFR AMR EAS EUR FIN; do
+	awk '{print $1, $2, $3, $4, $5, $6}' $temp/tmp${step}_chr6_${anc}_${val}.frq | sed "s/ /\t/g" > $temp/tmp${step}_chr6_${anc}_${val}_frq.txt
+done
+done
+
+# combine freq file with conditional analysis results
+for val in HLA SNP; do
+for anc in AFR AMR EAS EUR FIN; do
+	awk -v file=$temp/tmp${step}_chr6_${anc}_${val}_frq.txt 'BEGIN{while((getline<file)>0)l[$2]=$0}$2 in l{print $0"\t"l[$2]}' $cond/${anc}/${anc}_conditional_analysis_${val}.txt > $temp/tmp${step}_chr6_${anc}_${val}_TEMP1.txt
+done
+done
+
+### SNP
+# take SNPs with p value < 3.5E-6 (threshold based on number of individuals in AFR samples - 14135)
+# EAS - no power, no SNPs
+for anc in AFR AMR EAS FIN; do
+	$awkPath/awk -M -v PREC=100 '$12 < 3.5E-6' $temp/tmp${step}_chr6_${anc}_SNP_TEMP1.txt > $temp/tmp${step}_chr6_${anc}_SNP_TEMP2.txt
+done
+
+# EUR file is prepared separately, because some SNPs lower in the file would be included with the current p value threshold
+awk 'NR > 1 && NR < 40' $temp/tmp${step}_chr6_EUR_SNP_TEMP1.txt > $temp/tmp${step}_chr6_EUR_SNP_TEMP2.txt
+
+### HLA
+# take HLA with p value < 3.6E-4 (threshold based on number of individuals in AFR samples - 137)
+# EAS - no power, no HLA alleles
+for anc in AFR AMR EAS FIN; do
+	$awkPath/awk -M -v PREC=100 '$12 < 3.6E-4' $temp/tmp${step}_chr6_${anc}_HLA_TEMP1.txt > $temp/tmp${step}_chr6_${anc}_HLA_TEMP2.txt
+done
+
+# EUR file is prepared separately, because some HLA alleles lower in the file would be included with the current p value threshold
+awk 'NR > 1 && NR < 42' $temp/tmp${step}_chr6_EUR_HLA_TEMP1.txt > $temp/tmp${step}_chr6_EUR_HLA_TEMP2.txt
+
+# prepare GRS model file
+for val in HLA SNP; do
+for anc in AFR AMR EUR FIN; do
+	echo "SNP EA AF WT CHR POS OA" | sed "s/ /\t/g" > $out/chr6_${anc}_${val}_grs_model.txt
+	awk '{if($4 == $15){print $2, $4, $17, $7, $1, $3, $16}else{print $2, $4, 1-$17, $7, $1, $3, $15}}' $temp/tmp${step}_chr6_${anc}_${val}_TEMP2.txt | sed "s/ /\t/g" >> $out/chr6_${anc}_${val}_grs_model.txt
+done
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Check impuation quality for SNP and HLA in models (only HLA)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=2
+
+for anc in AFR AMR EUR FIN; do
+	zcat $imp/${anc}/chr6.info.gz | awk '($5>0.005 && $7>0.5) {print $0}' > $temp/tmp${step}_chr6_${anc}_info.txt
+done
+
+# combine model file with chr6 info file
+for val in HLA SNP; do
+for anc in AFR AMR EUR FIN; do
+	awk -v file=$temp/tmp${step}_chr6_${anc}_info.txt 'BEGIN{while((getline<file)>0)l[$1]=$0}$1 in l{print $0"\t"l[$1]}' $out/chr6_${anc}_${val}_grs_model.txt > $temp/tmp${step}_chr6_${anc}_${val}_TEMP1.txt
+done
+done
+
+for val in HLA SNP; do
+for anc in AFR AMR EUR FIN; do
+	#echo "SNP EA AF WT CHR POS OA SNP REF(0) ALT(1) ALT_Frq MAF AvgCall Rsq Genotyped LooRsq EmpR EmpRsq Dose0 Dose1" | sed "s/ /\t/g" > $temp/tmp${step}_chr6_${anc}_${val}_Rsq.txt
+	cat $temp/tmp${step}_chr6_${anc}_${val}_TEMP1.txt | sed "s/ /\t/g" > $temp/tmp${step}_chr6_${anc}_${val}_Rsq.txt
+done
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# GRS risk prediction (only HLA)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=3
+
+for val in HLA SNP; do
+for anc in AFR AMR EUR FIN; do
+	$KING -b $imp/Filtered_${anc}/chr6.dose.filtered.${val}.bed --risk --model $out/chr6_${anc}_${val}_grs_model.txt --prevalence 0.004 --noflip --prefix $out/chr6_${anc}_${val}_grs.txt &>> $out/${anc}_${val}_grs.log
+done
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# GRS risk prediction in different ancestries (only HLA)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=4
+
+# run AFR model in AMR, EUR, FIN ancestry
+
+for val in HLA SNP; do
+for anc in AMR EUR FIN; do
+	$KING -b $imp/Filtered_${anc}/chr6.dose.filtered.${val}.bed --risk --model $out/chr6_AFR_${val}_grs_model.txt --prevalence 0.004 --noflip --prefix $out/chr6_AFR_${val}_grs_in_${anc}.txt &>> $out/AFR_${val}_grs_in_${anc}.log
+done
+done
+
+# run AMR model in AFR, EUR, FIN ancestry
+
+for val in HLA SNP; do
+for anc in AFR EUR FIN; do
+	$KING -b $imp/Filtered_${anc}/chr6.dose.filtered.${val}.bed --risk --model $out/chr6_AMR_${val}_grs_model.txt --prevalence 0.004 --noflip --prefix $out/chr6_AMR_${val}_grs_in_${anc}.txt &>> $out/AMR_${val}_grs_in_${anc}.log
+done
+done
+
+# run EUR model in AFR, AMR, FIN ancestry
+
+for val in HLA SNP; do
+for anc in AFR AMR FIN; do
+	$KING -b $imp/Filtered_${anc}/chr6.dose.filtered.${val}.bed --risk --model $out/chr6_EUR_${val}_grs_model.txt --prevalence 0.004 --noflip --prefix $out/chr6_EUR_${val}_grs_in_${anc}.txt &>> $out/EUR_${val}_grs_in_${anc}.log
+done
+done
+
+# run FIN model in AFR, AMR, EUR ancestry
+
+for val in HLA SNP; do
+for anc in AFR AMR EUR; do
+	$KING -b $imp/Filtered_${anc}/chr6.dose.filtered.${val}.bed --risk --model $out/chr6_FIN_${val}_grs_model.txt --prevalence 0.004 --noflip --prefix $out/chr6_FIN_${val}_grs_in_${anc}.txt &>> $out/FIN_${val}_grs_in_${anc}.log
+done
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# GRS model (AFR 2019)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=5
+
+# prepare GRS model (Suppl. Table 7 Onengut-Gumuscu et al. 2019 - https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6385701/)
+# only effect allele was listed, so the other allele was taken from bravo (https://bravo.sph.umich.edu/freeze8/hg38/)
+
+echo "SNP EA AF WT CHR POS OA" | sed "s/ /\t/g" > $out/chr6_AFR2019_SNP_grs_model.txt
+echo "rs34303755 C 0.216 1.079 6 32450613 A" | sed "s/ /\t/g" >> $out/chr6_AFR2019_SNP_grs_model.txt
+echo "rs34850435 T 0.345 0.839 6 32583299 C" | sed "s/ /\t/g" >> $out/chr6_AFR2019_SNP_grs_model.txt
+echo "rs9271594 G 0.095 1.801 6 32591213 A" | sed "s/ /\t/g" >> $out/chr6_AFR2019_SNP_grs_model.txt
+echo "rs2187668 T 0.076 1.367 6 32605884 C" | sed "s/ /\t/g" >> $out/chr6_AFR2019_SNP_grs_model.txt
+echo "rs9273363 A 0.131 1.702 6 32626272 C" | sed "s/ /\t/g" >> $out/chr6_AFR2019_SNP_grs_model.txt
+echo "rs689 T 0.265 0.403 11 2182224 A" | sed "s/ /\t/g" >> $out/chr6_AFR2019_SNP_grs_model.txt
+echo "rs2290400 C 0.459 0.295 17 38066240 T" | sed "s/ /\t/g" >> $out/chr6_AFR2019_SNP_grs_model.txt
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# GRS risk prediction (AFR 2019) in different ancestries
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=6
+
+for anc in AFR AMR EUR FIN; do
+	$KING -b $imp/Filtered_${anc}/chr6.dose.filtered.SNP.bed --risk --model $out/chr6_AFR2019_SNP_grs_model.txt --prevalence 0.004 --noflip --prefix $out/chr6_AFR2019_SNP_grs_in_${anc}.txt &>> $out/AFR2019_SNP_grs_in_${anc}.log
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# GRS risk prediction in AMR (AP, NA, EU) (only HLA)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=7
+
+# AMR genotyp data were separated based on continents (AP - Asia Pacific, EU - Europe, NA - North America)
+# run AFR, AMR, EUR, FIN models in AMR continents (AP, EU, NA)
+
+for val in HLA SNP; do
+for anc in AFR AMR EUR FIN; do
+for cont in AP EU NA; do
+	$KING -b $imp/Filtered_AMR/${cont}/chr6.dose.filtered.${val}.bed --risk --model $out/chr6_${anc}_${val}_grs_model.txt --prevalence 0.004 --noflip --prefix $out/chr6_${anc}_${val}_grs_in_${cont}.txt &>> $out/${anc}_${val}_grs_in_${cont}.log
+done
+done
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# GRS risk prediction in AMR (AP_Indian, NA_Hispanic) (only HLA)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=8
+
+# AMR genotyp data were separated based on continents (AP - Asia Pacific, EU - Europe, NA - North America)
+# run AFR, AMR, EUR, FIN models in AMR continents (AP_Indian, NA_Hispanic)
+
+for val in HLA SNP; do
+for anc in AFR AMR EUR FIN; do
+for cont in AP_Indian NA_Hispanic; do
+	$KING -b $imp/Filtered_AMR/${cont}/chr6.dose.filtered.${val}.bed --risk --model $out/chr6_${anc}_${val}_grs_model.txt --prevalence 0.004 --noflip --prefix $out/chr6_${anc}_${val}_grs_in_${cont}.txt &>> $out/${anc}_${val}_grs_in_${cont}.log
+done
+done
+done
