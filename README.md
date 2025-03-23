@@ -60,3 +60,5 @@ bash HLA_remove_missing_pheno.bsh
 ```bash
 bash HLA_merge.bsh
 ```
+
+## HLA association analysis
