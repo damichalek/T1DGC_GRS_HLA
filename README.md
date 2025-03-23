@@ -50,3 +50,8 @@ Rscript mega_pca_sex_merged.R
 bash HLA_filter_imp.bsh
 bash HLA_filter_imp_AMR.bsh # after SAS separation from AMR
 ```
+
+3. Remove individuals with missing phenotype information
+```bash
+bash HLA_remove_missing_pheno.bsh
+```
