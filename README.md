@@ -45,13 +45,18 @@ Rscript mega_pca_sex_merged.R
 - Phasing - Eagle v2.4 (phased output)
 - Mode - Quality Control & Imputation
 
-2. Filter HLA imputation results
+2. Filter HLA imputation results (HLA alleles and HLA genes (MAF > 0.005 and R2 > 0.5))
 ```bash
-bash hla_filter_imp.bsh
-bash hla_filter_imp_AMR.bsh # after SAS separation from AMR
+bash HLA_filter_imp.bsh
+bash HLA_filter_imp_AMR.bsh # after SAS separation from AMR
 ```
 
 3. Remove individuals with missing phenotype information
 ```bash
-bash hla_remove_missing_pheno.bsh
+bash HLA_remove_missing_pheno.bsh
+```
+
+4. Merge filtered imputed AFR, AMR, EUR, FIN data
+```bash
+bash HLA_merge.bsh
 ```
