@@ -63,8 +63,9 @@ bash HLA_merge.bsh
 
 ## HLA association analysis
 
-1. Run logistic regression models with 5 PCs for each ancestry in plink1.9
+1. Run logistic regression models with 5 PCs for each ancestry and for combined ancestry data in plink1.9
 ```bash
 bash assoc.bsh
 bash assoc_AMR.bsh # after SAS separation from AMR
+bash assoc_merged.bsh
 ```
