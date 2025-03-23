@@ -82,4 +82,5 @@ bash hla_condition_merged.bsh
 ```bash
 bash grs.bsh
 bash grs_AMR.bsh # after SAS separation from AMR
+bash grs_merged.bsh
 ```
