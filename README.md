@@ -73,4 +73,5 @@ bash assoc_merged.bsh
 2. Run conditional analysis
 ```bash
 bash hla_condition_${anc}.bsh
+bash hla_condition_merged.bsh
 ```
