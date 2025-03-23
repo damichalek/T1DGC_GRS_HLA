@@ -1,0 +1,91 @@
+#!/bin/bash
+
+echo "GRS Risk Prediction for merged (AFR, AMR, EUR, FIN) imputed ImmunoChip data - individuals without phenotypes are removed (MAF > 0.005 and R2 > 0.5), Jan 03, 2025, by Dominika Michalek"
+
+PLINK=plink
+KING=king
+logfile=grs_merged.log
+date > $logfile
+
+main=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA
+imp=${main}/HLA/Imputation
+cond=${main}/HLA/association_analysis_merged/conditional_analysis/output/all
+temp=${main}/HLA/GRS_merged/Temp
+out=${main}/HLA/GRS_merged/output
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# GRS model (only HLA)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=1
+
+for val in HLA SNP; do
+	$PLINK --bfile ${imp}/Filtered_merged_pheno/chr6.dose.filtered.${val} --freq --nonfounders --out ${temp}/tmp${step}_chr6_merged_${val} &>> $logfile
+done
+
+# change spaces to tabs in freq files
+for val in HLA SNP; do
+	awk '{print $1, $2, $3, $4, $5, $6}' ${temp}/tmp${step}_chr6_merged_${val}.frq | sed "s/ /\t/g" > ${temp}/tmp${step}_chr6_merged_${val}_frq.txt
+done
+
+# combine freq file with conditional analysis results
+for val in HLA SNP; do
+	awk -v file=${temp}/tmp${step}_chr6_merged_${val}_frq.txt 'BEGIN{while((getline<file)>0)l[$2]=$0}$2 in l{print $0"\t"l[$2]}' ${cond}/merged_conditional_analysis_${val}.txt > ${temp}/tmp${step}_chr6_merged_${val}_TEMP1.txt
+done
+
+### SNP
+# take SNPs with p value < 3.4E-6 (threshold based on number of SNPs used for conditional analysis - 14517)
+awk 'NR > 1 && NR < 38' ${temp}/tmp${step}_chr6_merged_SNP_TEMP1.txt > ${temp}/tmp${step}_chr6_merged_SNP_TEMP2.txt
+
+### HLA
+# take HLA with p value < 2.8E-4 (threshold based on number of HLA alleles used for conditional analysis - 176)
+awk 'NR > 1 && NR < 43' ${temp}/tmp${step}_chr6_merged_HLA_TEMP1.txt > ${temp}/tmp${step}_chr6_merged_HLA_TEMP2.txt
+
+# prepare GRS model file
+for val in HLA SNP; do
+	echo "SNP EA AF WT CHR POS OA" | sed "s/ /\t/g" > ${out}/chr6_merged_${val}_grs_model.txt
+	awk '{if($4 == $15){print $2, $4, $17, $7, $1, $3, $16}else{print $2, $4, 1-$17, $7, $1, $3, $15}}' ${temp}/tmp${step}_chr6_merged_${val}_TEMP2.txt | sed "s/ /\t/g" >> ${out}/chr6_merged_${val}_grs_model.txt
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Check impuation quality for SNP and HLA in models (only HLA)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=2
+
+# I'm using EUR imputation results, as EUR has the biggest sample size
+zcat ${imp}/EUR/chr6.info.gz | awk '($5>0.005 && $7>0.5) {print $0}' > ${temp}/tmp${step}_chr6_EUR_info.txt
+
+# combine model file with chr6 info file
+for val in HLA SNP; do
+	awk -v file=${temp}/tmp${step}_chr6_EUR_info.txt 'BEGIN{while((getline<file)>0)l[$1]=$0}$1 in l{print $0"\t"l[$1]}' ${out}/chr6_merged_${val}_grs_model.txt > ${temp}/tmp${step}_chr6_merged_${val}_TEMP1.txt
+done
+
+for val in HLA SNP; do
+	#echo "SNP EA AF WT CHR POS OA SNP REF(0) ALT(1) ALT_Frq MAF AvgCall Rsq Genotyped LooRsq EmpR EmpRsq Dose0 Dose1" | sed "s/ /\t/g" > ${temp}/tmp${step}_chr6_merged_${val}_Rsq.txt
+	cat ${temp}/tmp${step}_chr6_merged_${val}_TEMP1.txt | sed "s/ /\t/g" > ${temp}/tmp${step}_chr6_merged_${val}_Rsq.txt
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# GRS risk prediction (only HLA)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=3
+
+for val in HLA SNP; do
+$KING -b ${imp}/Filtered_merged_pheno/chr6.dose.filtered.${val}.bed --risk --model ${out}/chr6_merged_${val}_grs_model.txt --prevalence 0.004 --noflip --prefix ${out}/chr6_merged_${val}_grs_in_merged &>> ${out}/merged_${val}_grs_in_merged.log
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# GRS risk prediction in different ancestries (only HLA)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=4
+
+# run merged model in AFR, AMR, EUR, FIN, SAS ancestry
+
+for val in HLA SNP; do
+for anc in AFR AMR EUR FIN SAS; do
+$KING -b ${imp}/Filtered_${anc}_pheno/chr6.dose.filtered.${val}.bed --risk --model ${out}/chr6_merged_${val}_grs_model.txt --prevalence 0.004 --noflip --prefix ${out}/chr6_merged_${val}_grs_in_${anc} &>> ${out}/merged_${val}_grs_in_${anc}.log
+done
+done
