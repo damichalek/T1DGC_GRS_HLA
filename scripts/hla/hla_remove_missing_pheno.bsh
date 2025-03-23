@@ -1,0 +1,38 @@
+#!/bin/bash
+
+echo "Remove individuals with missing phenotypes from filtered HLA Imputation results for ImmunoChip data (MAF > 0.005 and R2 > 0.5), Oct 12 2024, by Dominika Michalek"
+
+PLINK=plink
+logfile=HLA_remove_missing_pheno.log
+date > $logfile
+
+imp=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/Imputation
+temp=${imp}/Temp_pheno
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Prepare a list of individuals with missing phenotypes
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=1
+
+for anc in AFR AMR AMR_old EAS EUR FIN SAS; do
+awk '$6 == -9 {print $1, $2}' ${imp}/Filtered_${anc}/chr6.dose.filtered.fam > ${temp}/no_pheno_tbr_${anc}.txt
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Remove individuals with missing phenotypes
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=2
+
+# all
+for anc in AFR AMR AMR_old EAS EUR FIN SAS; do
+$PLINK --bfile ${imp}/Filtered_${anc}/chr6.dose.filtered --remove ${temp}/no_pheno_tbr_${anc}.txt --make-bed --out ${imp}/Filtered_${anc}_pheno/chr6.dose.filtered &>> $logfile
+done
+
+# AA, HLA and SNPs
+for anc in AFR AMR AMR_old EAS EUR FIN SAS; do
+for val in AA HLA SNP; do
+$PLINK --bfile ${imp}/Filtered_${anc}/chr6.dose.filtered.${val} --remove ${temp}/no_pheno_tbr_${anc}.txt --make-bed --out ${imp}/Filtered_${anc}_pheno/chr6.dose.filtered.${val} &>> $logfile
+done
+done
