@@ -1,0 +1,86 @@
+#!/bin/bash
+
+echo "Conditional analysis of HLA region for imputed ImmunoChip data (FIN) (MAF > 0.005 and R2 > 0.5), Nov 8, 2023, by Dominika Michalek"
+
+PLINK=plink1.9
+logfile=hla_condition_FIN.log
+date > $logfile
+
+imp=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/Imputation/Filtered_FIN
+input=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/association_analysis/conditional_analysis/input
+output=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/association_analysis/conditional_analysis/output/FIN
+assoc=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/association_analysis/Temp
+pc=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/PCA/PCs
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Prepare list of AA, HLA, SNP to use in conditional analysis
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=1
+
+# make a list of AA markers with only one amino-acid, "x" (stop codon), "." and bi-allelic amino-acid at the end
+# $2 ~ /_[a-z A-Z]{1}$/ -> anything in column 2 that ends with _(any one letter) -> amino_acid + stop codon
+# $2 ~ /_\.$/ -> anything in column 2 that ends with _.
+# $2 ~ /[[:digit:]]$/ -> anything in column 2 that ends with a digit -> bi-allelic amino-acid
+
+awk '$2 ~ /_[a-z A-Z]{1}$/ || $2 ~ /_\.$/ || $2 ~ /[[:digit:]]$/ {print $2}' $imp/chr6.dose.filtered.AA.bim > $input/FIN_keep_AA.txt
+
+# make a list of HLA markers with 4 digits (2 fields)
+# $2 ~ /:[[:digit:]]{2}.*$/ -> anything in column 2 that ends with :(2 digits) and zero or more occurrences of any single character -> 4 digit allele
+
+awk '$2 ~ /:[[:digit:]]{2}.*$/ {print $2}' $imp/chr6.dose.filtered.HLA.bim > $input/FIN_keep_HLA.txt
+
+# make a list of SNP markers (rsID)
+
+awk '$2 ~ /rs/ {print $2}' $imp/chr6.dose.filtered.SNP.bim > $input/FIN_keep_SNP.txt
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Prepare independent AA, HLA and SNP files and condition lists
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=2
+
+# Independent AA and HLA
+
+for val in AA HLA; do
+	awk 'NR == 1' $assoc/assoc_logistic_chr6_${val}_FIN.txt > $output/FIN_conditional_analysis_${val}.txt
+	sort -g -k 12 $assoc/assoc_logistic_chr6_${val}_FIN.txt | awk 'NR == 2' >> $output/FIN_conditional_analysis_${val}.txt
+done
+
+# Independent SNP
+
+# take the first SNP that has rsID
+awk 'NR == 1' $assoc/assoc_logistic_chr6_SNP_FIN.txt > $output/FIN_conditional_analysis_SNP.txt
+sort -g -k 12 $assoc/assoc_logistic_chr6_SNP_FIN.txt | awk 'NR == 4' >> $output/FIN_conditional_analysis_SNP.txt
+
+# Condition list (AA, HLA, SNP)
+
+for val in AA HLA SNP; do
+	awk 'NR == 2 {print $2}' $output/FIN_conditional_analysis_${val}.txt > $input/FIN_condition_list_${val}.txt
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Run conditional analysis (AA, HLA, SNP)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=3
+
+for val in AA HLA SNP; do
+for i in {1..8}; do
+$PLINK --bfile $imp/chr6.dose.filtered.${val} --logistic hide-covar beta \
+    --extract $input/FIN_keep_${val}.txt \
+  	--maf 0.005 \
+  	--mac 20 \
+  	--ci 0.95 \
+  	--covar $pc/mega_b37_pcs_FIN.txt \
+  	--covar-name PC1-PC5 \
+  	--condition-list $input/FIN_condition_list_${val}.txt \
+  	--out $output/FIN_chr6_${val}_condition${i} &>> $logfile
+
+# add the most significant AA, HLA, SNP result to the "Indepented AA, HLA, SNP"
+sort -g -k 12 $output/FIN_chr6_${val}_condition${i}.assoc.logistic | grep -v "NA" | awk 'NR == 2 {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' | sed "s/ /\t/g" >> $output/FIN_conditional_analysis_${val}.txt
+
+# add the most significant AA, HLA, SNP to the "Condition list (AA, HLA, SNP)"
+sort -g -k 12 $output/FIN_chr6_${val}_condition${i}.assoc.logistic | grep -v "NA"  | awk 'NR == 2 {print $2}' >> $input/FIN_condition_list_${val}.txt
+done
+done
