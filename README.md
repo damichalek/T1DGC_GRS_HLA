@@ -25,6 +25,7 @@ bash merge.bsh
 4. Principal Component Analysis (PCA) </br>
 ```bash
 bash pca.bsh
+bash pca_merged.bsh
 
 # based on the scree plots we decided to use 5 PCs for each ancestry for association analysis
 Rscript scree_plot.R
