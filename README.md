@@ -39,8 +39,14 @@ Rscript mega_pca_sex_merged.R
 ```
 
 ## HLA imputation
-Imputation to Multi-ethnic HLA reference panel (Minimac4) 1.7.3 on [Michigan Imputation Server](https://imputationserver.sph.umich.edu/index.html#!).
+1. Impute to Multi-ethnic HLA reference panel (Minimac4) 1.7.3 on [Michigan Imputation Server](https://imputationserver.sph.umich.edu/index.html#!).
 - Reference Panel - four-digit multi-ethnic HLA reference panel v2 (GRCh37/hg19)
 - Array Build - GRCh37/hg19
 - Phasing - Eagle v2.4 (phased output)
 - Mode - Quality Control & Imputation
+
+2. Filter HLA imputation results
+```bash
+bash HLA_filter_imp.bsh
+bash HLA_filter_imp_AMR.bsh # after SAS separation from AMR
+```
