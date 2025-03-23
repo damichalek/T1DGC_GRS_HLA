@@ -37,3 +37,12 @@ Rscript mega_pca_sex_${anc}.R
 Rscript mega_pca_aff_merged.R
 Rscript mega_pca_sex_merged.R
 ```
+
+## HLA imputation
+Imputation to Multi-ethnic HLA reference panel on [Michigan Imputation Server](https://imputationserver.sph.umich.edu/index.html#!).
+
+Imputation to HLA (Minimac4) 1.7.3
+- Reference Panel - four-digit multi-ethnic HLA reference panel v2 (GRCh37/hg19)
+- Array Build - GRCh37/hg19
+- Phasing - Eagle v2.4 (phased output)
+- Mode - Quality Control & Imputation
