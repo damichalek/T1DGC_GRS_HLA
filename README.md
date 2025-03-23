@@ -77,3 +77,9 @@ bash hla_condition_merged.bsh
 ```
 
 ## Genetic Risk Score (GRS) prediction
+
+1. Construct GRS models and calculate GRS for each individual
+```bash
+bash grs.bsh
+bash grs_AMR.bsh # after SAS separation from AMR
+```
