@@ -1,0 +1,174 @@
+#!/bin/bash
+
+echo "Filter HLA Imputation results for ImmunoChip data (MAF > 0.005 and R2 > 0.5), Sep 20 2023, by Dominika Michalek"
+
+PLINK=plink
+KING=king
+logfile=HLA_filter_imp.log
+date > $logfile
+
+imp=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/Imputation
+temp=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/Imputation/Temp
+data=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/release4/processed_for_imputation/topmed_alignment
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Prepare list of unrelated individuals
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=1
+
+for anc in AFR AMR EAS EUR FIN; do
+	awk -v file=$data/unrelateds_all.txt 'BEGIN{while((getline<file)>0)l[$2]=$0}$2 in l{print $0"\t"l[$2]}' $data/${anc}/mega_b37-updated-chr6_${anc}_cluster.fam > $temp/tmp${step}_${anc}.txt
+	awk '{print $2}' $temp/tmp${step}_${anc}.txt > $temp/tmp${step}_${anc}_keep_list.txt
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Keep only unrelated individuals
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=2
+step1=$((step-1))
+
+# index vcf files
+
+for anc in AFR AMR EAS EUR FIN; do
+	tabix -p vcf $imp/${anc}/chr6.dose.vcf.gz
+	bcftools index -c $imp/${anc}/chr6.dose.vcf.gz
+done
+
+# keep only unrelated individuals
+# prefix with "^" to exclude samples
+
+for anc in AFR AMR EAS EUR FIN; do
+	bcftools view --samples-file $temp/tmp${step1}_${anc}_keep_list.txt $imp/${anc}/chr6.dose.vcf.gz -o $temp/chr6.dose.${anc}.vcf.gz -Oz
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Filter variants, HLA alleles and HLA genes (VCF)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=3
+
+# Filter (MAF > 0.005 and R2 > 0.5)
+for anc in AFR AMR EAS EUR FIN; do
+	zcat $imp/${anc}/chr6.info.gz | awk 'NR>1 && ($5>0.005 && $7>0.5) {print $1}' > $temp/tmp${step}_chr6_${anc}_snp_keep_list.txt
+done
+
+# use --exclude to exclude SNPs
+for anc in AFR AMR EAS EUR FIN; do
+	bcftools view --include ID==@$temp/tmp${step}_chr6_${anc}_snp_keep_list.txt $temp/chr6.dose.${anc}.vcf.gz -o $imp/Filtered_${anc}/chr6.dose.filtered.vcf.gz -Oz
+done
+
+# index vcf files
+# use bcftools to have .csi tabixed files
+for anc in AFR AMR EAS EUR FIN; do
+	tabix -p vcf $imp/Filtered_${anc}/chr6.dose.filtered.vcf.gz
+	bcftools index -c $imp/Filtered_${anc}/chr6.dose.filtered.vcf.gz
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Convert VCF format to PLINK format
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=4
+
+# The following code is from: https://github.com/ccrobertson/HumanCoreExome/blob/master/scripts/convert_to_plink.slurm
+
+# Convert to PLINK
+
+for anc in AFR AMR EAS EUR FIN; do
+	plink2 --memory 15000 --vcf $imp/Filtered_${anc}/chr6.dose.filtered.vcf.gz --double-id --make-bed --out $temp/tmp${step}_chr6_${anc}_1 &>> $logfile
+done
+
+# Update FID
+
+# update-ids
+# 1.Old family ID
+# 2.Old within-family ID
+# 3.New family ID
+# 4.New within-family ID
+
+for anc in AFR AMR EAS EUR FIN; do
+	awk '{print $2,$2,$1,$2}' $data/${anc}/mega_b37-updated-chr6_${anc}_cluster.fam > $temp/tmp${step}_${anc}_update_FID.txt
+	$PLINK --memory 15000 --bfile $temp/tmp${step}_chr6_${anc}_1 --update-ids $temp/tmp${step}_${anc}_update_FID.txt --make-bed --out $temp/tmp${step}_chr6_${anc}_2 &>> $logfile
+done
+
+# Extract complete families
+
+# --update-parents
+# 1.Family ID
+# 2.Within-family ID
+# 3.New paternal within-family ID
+# 4.New maternal within-family ID
+
+for anc in AFR AMR EAS EUR FIN; do
+	awk '{print $1,$2,$3,$4}' $data/${anc}/mega_b37-updated-chr6_${anc}_cluster.fam > $temp/tmp${step}_${anc}_update_parents.txt
+	$PLINK --memory 15000 --bfile $temp/tmp${step}_chr6_${anc}_2 --keep $temp/tmp${step}_${anc}_update_parents.txt --make-bed --out $temp/tmp${step}_chr6_${anc}_2b &>> $logfile
+done
+
+# Update parents IDs
+
+for anc in AFR AMR EAS EUR FIN; do
+	$PLINK --memory 15000 --bfile $temp/tmp${step}_chr6_${anc}_2b --update-parents $temp/tmp${step}_${anc}_update_parents.txt --make-bed --out $temp/tmp${step}_chr6_${anc}_3 &>> $logfile
+done
+
+# Update sex
+
+# --update-sex 
+# FIDs and IIDs in the first two columns
+# Sex information (1 or M = male, 2 or F = female, 0 = missing) in the (n+2)th column.
+
+for anc in AFR AMR EAS EUR FIN; do
+	awk '{print $1,$2,$5}' $data/${anc}/mega_b37-updated-chr6_${anc}_cluster.fam > $temp/tmp${step}_${anc}_update_sex.txt
+	$PLINK --memory 15000 --bfile $temp/tmp${step}_chr6_${anc}_3 --update-sex $temp/tmp${step}_${anc}_update_sex.txt --make-bed --out $temp/tmp${step}_chr6_${anc}_4 &>> $logfile
+done
+
+# Update T1D status
+
+# --pheno causes phenotype values to be read from the 3rd column of the specified space- or tab-delimited file, 
+# instead of the .fam or .ped file. The first and second columns of that file must contain family and within-family IDs, respectively.
+
+for anc in AFR AMR EAS EUR FIN; do
+	awk '{print $1,$2,$6}' $data/${anc}/mega_b37-updated-chr6_${anc}_cluster.fam > $temp/tmp${step}_${anc}_update_case.txt
+	$PLINK --memory 15000 --bfile $temp/tmp${step}_chr6_${anc}_4 --pheno $temp/tmp${step}_${anc}_update_case.txt --make-bed --out $imp/Filtered_${anc}/chr6.dose.filtered &>> $logfile
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Separate SNPs, AA and HLA genes (PLINK and VCF)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=5
+
+# HLA genes
+for anc in AFR AMR EAS EUR FIN;	 do
+	awk '$2 ~ /HLA/ {print $2}' $imp/Filtered_${anc}/chr6.dose.filtered.bim > $temp/tmp${step}_chr6_HLA_${anc}.txt
+done
+
+# Amino-acids (AA)
+for anc in AFR AMR EAS EUR FIN;	 do
+	awk '$2 ~ /AA/ {print $2}' $imp/Filtered_${anc}/chr6.dose.filtered.bim > $temp/tmp${step}_chr6_AA_${anc}.txt
+done
+
+# SNPs
+for anc in AFR AMR EAS EUR FIN; do
+	awk '$2 ~ /rs/ {print $2}' $imp/Filtered_${anc}/chr6.dose.filtered.bim > $temp/tmp${step}_chr6_SNP_${anc}.txt
+	awk '$2 ~ /SNPS/ {print $2}' $imp/Filtered_${anc}/chr6.dose.filtered.bim >> $temp/tmp${step}_chr6_SNP_${anc}.txt
+done
+
+# extract HLA, AA, SNPs for PLINK format files
+
+for anc in AFR AMR EAS EUR FIN; do
+	for val in HLA AA SNP; do
+		$PLINK --bfile $imp/Filtered_${anc}/chr6.dose.filtered --extract $temp/tmp${step}_chr6_${val}_${anc}.txt --make-bed --out $imp/Filtered_${anc}/chr6.dose.filtered.${val} &>> $logfile
+	done
+done
+
+# extract HLA, AA, SNPs for VCF format files
+
+for anc in AFR AMR EAS EUR FIN; do
+	for val in HLA AA SNP; do
+		bcftools view --include ID==@$temp/tmp${step}_chr6_${val}_${anc}.txt $imp/Filtered_${anc}/chr6.dose.filtered.vcf.gz -o $imp/Filtered_${anc}/chr6.dose.filtered.${val}.vcf.gz -Oz
+		tabix -p vcf $imp/Filtered_${anc}/chr6.dose.filtered.${val}.vcf.gz
+		bcftools index -c $imp/Filtered_${anc}/chr6.dose.filtered.${val}.vcf.gz
+	done
+done
