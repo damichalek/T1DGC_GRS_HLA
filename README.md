@@ -17,9 +17,12 @@ Genotype data in the HLA region on human chromosome 6 (28Mbp - 34Mbp) were extra
 bash anc_infer.bsh
 ```
 
-3. Principal Component Analysis (PCA)
+3. Principal Component Analysis (PCA) </br>
 ```bash
 bash pca.bsh
+
+# based on the scree plots we decided to use 5 PCs for each ancestry for association analysis
+Rscript scree_plot.R
 
 # plot PCs by affection status and sex for each ancestry
 Rscript mega_pca_aff_${anc}.R
