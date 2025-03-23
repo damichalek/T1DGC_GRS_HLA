@@ -1,0 +1,26 @@
+#!/bin/bash
+
+echo "Merge genotyped ImmunoChip data, Dec 09 2024, by Dominika Michalek"
+
+PLINK=plink
+logfile=merge.log
+date > $logfile
+
+main=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA
+data=${main}/release4/processed_for_imputation/topmed_alignment/unrelated
+out=${data}/all
+temp=${data}/Temp
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Merge genotyped AFR, AMR, EUR and FIN datasets
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=1
+
+# Make list of binary files to merge
+for anc in AMR EUR FIN; do
+echo "${data}/${anc}/mega_b37-updated-unrelated-${anc}_cluster.bed ${data}/${anc}/mega_b37-updated-unrelated-${anc}_cluster.bim ${data}/${anc}/mega_b37-updated-unrelated-${anc}_cluster.fam" | sed "s/ /\t/g" >> ${temp}/files_to_merge.txt
+done
+
+# Merge genotyped files
+$PLINK --bfile ${data}/AFR/mega_b37-updated-unrelated-AFR_cluster --merge-list ${temp}/files_to_merge.txt --make-bed --out ${out}/mega_b37-updated-unrelated &>> $logfile
