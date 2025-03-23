@@ -27,10 +27,13 @@ bash merge.bsh
 bash pca.bsh
 bash pca_merged.bsh
 
-# based on the scree plots we decided to use 5 PCs for each ancestry for association analysis
+# based on the scree plots we decided to use 5 PCs for each ancestry and merged ancestry data for association analysis
 Rscript scree_plot.R
+Rscript scree_plot_merged.R
 
-# plot PCs by affection status and sex for each ancestry
+# plot PCs by affection status and sex for each ancestry and merged ancestry data
 Rscript mega_pca_aff_${anc}.R
 Rscript mega_pca_sex_${anc}.R
+Rscript mega_pca_aff_merged.R
+Rscript mega_pca_sex_merged.R
 ```
