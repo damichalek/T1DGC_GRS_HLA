@@ -20,4 +20,8 @@ bash anc_infer.bsh
 3. Principal Component Analysis (PCA)
 ```bash
 bash pca.bsh
+
+# plot PCs by affection status and sex for each ancestry
+Rscript mega_pca_aff_${anc}.R
+Rscript mega_pca_sex_${anc}.R
 ```
