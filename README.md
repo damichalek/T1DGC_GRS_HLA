@@ -69,3 +69,8 @@ bash assoc.bsh
 bash assoc_AMR.bsh # after SAS separation from AMR
 bash assoc_merged.bsh
 ```
+
+2. Run conditional analysis
+```bash
+bash hla_condition_${anc}.bsh
+```
