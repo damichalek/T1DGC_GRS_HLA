@@ -1,0 +1,81 @@
+#!/bin/bash
+
+echo "PCA for merged ImmunoChip data (projection to 1000 Genomes Project phase 3 Reference Panel), Jan 02, 2025, by Dominika Michalek"
+
+PLINK=plink
+plink2=/mnt/t1/apps/statgen/plink2/plink2
+KING=king
+logfile=pca_merged.log
+date > $logfile
+
+main=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA
+data=${main}/release4/processed_for_imputation/topmed_alignment/unrelated/all
+ref=${main}/ancestry_inference/Reference
+pcs=${main}/PCA/PCs_merged
+temp=${main}/PCA/Temp_merged
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#  Remove high LD regions
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=1
+
+# b37 coordinates obtained from https://genome.sph.umich.edu/wiki/Regions_of_high_linkage_disequilibrium_(LD)
+
+$PLINK --bfile ${data}/mega_b37-updated-unrelated --exclude range ${main}/PCA/high_LD_regions_range.txt --make-bed --out ${temp}/tmp${step}_merged_without_highLD &>> $logfile
+$PLINK --bfile ${ref}/KGref --exclude range ${main}/PCA/high_LD_regions_range.txt --make-bed --out ${temp}/tmp${step}_KGref_without_highLD &>> $logfile
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# LD-pruning
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=2
+step1=$((step-1))
+
+# The command below that specifies 50 5 0.2 would 
+# a) consider a window of 50 SNPs, 
+# b) calculate LD between each pair of SNPs in the window, 
+# b) remove one of a pair of SNPs if the LD is greater than 0.2, 
+# c) shift the window 5 SNPs forward and repeat the procedure
+
+for name in merged KGref; do
+$PLINK --bfile ${temp}/tmp${step1}_${name}_without_highLD --geno 0.05 --maf 0.01 --indep-pairwise 50 5 0.2 --autosome --biallelic-only strict --make-bed --out ${temp}/tmp${step}_${name}_without_highLD_pruning &>> $logfile
+$PLINK --bfile ${temp}/tmp${step1}_${name}_without_highLD --extract ${temp}/tmp${step}_${name}_without_highLD_pruning.prune.in --make-bed --out ${temp}/tmp${step}_${name}_without_highLD_pruned &>> $logfile
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Run PCA (project samples into 1000 Genomes Reference Panel)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=3
+step2=$((step-1))
+
+# QC check if all of the samples are unrelated
+for name in merged KGref; do
+$KING -b ${temp}/tmp${step2}_${name}_without_highLD_pruned.bed --unrelated --prefix ${temp}/tmp${step}_${name}_without_highLD_pruned &>> $logfile
+done
+
+# calculate principal components in 1000 Genomes Reference Panel
+# Run PCA and save variance weights
+$plink2 --bfile ${temp}/tmp${step2}_KGref_without_highLD_pruned --maf 0.05 --freq --pca biallelic-var-wts --out ${temp}/tmp${step}_KGref_without_highLD_pruned_pca &>> $logfile
+
+# project unrelated subjects onto 1000 Genomes Reference Panel PCA space
+# Use --score option for PCA projection
+$plink2 --bfile ${temp}/tmp${step2}_merged_without_highLD_pruned --read-freq ${temp}/tmp${step}_KGref_without_highLD_pruned_pca.afreq --score ${temp}/tmp${step}_KGref_without_highLD_pruned_pca.eigenvec.var 2 3 header-read no-mean-imputation variance-standardize --score-col-nums 5-14 --out ${main}/PCA/mega_pca_b37_pruned_unrelated_merged_pca_proj_onto_KGref &>> $logfile
+
+cp ${temp}/tmp${step}_KGref_without_highLD_pruned_pca.eigenval ${main}/PCA/mega_pca_b37_pruned_unrelated_KGref.eigenval
+cp ${temp}/tmp${step}_KGref_without_highLD_pruned_pca.eigenvec ${main}/PCA/mega_pca_b37_pruned_unrelated_KGref.eigenvec
+cp ${temp}/tmp${step}_KGref_without_highLD_pruned_pca.eigenvec.var ${main}/PCA/mega_pca_b37_pruned_unrelated_KGref.eigenvec.var
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Prepare PCA files for meta-GRS
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=4
+
+awk -v file=${main}/PCA/mega_pca_b37_pruned_unrelated_merged_pca_proj_onto_KGref.sscore 'BEGIN{while((getline<file)>0)l[$2]=$0}$2 in l{print $0"\t"l[$2]}' ${data}/mega_b37-updated-unrelated.fam > ${temp}/tmp${step}_merged.txt
+
+echo "FID IID FA MO SEX AFF PC1 PC2 PC3 PC4 PC5" | sed "s/ /\t/g" > ${temp}/tmp${step}_merged_pc.txt
+awk '{print $1, $2, $3, $4, $5, $6, $12, $13, $14, $15, $16}' ${temp}/tmp${step}_merged.txt | sed "s/ /\t/g" >> ${temp}/tmp${step}_merged_pc.txt
+
+cp ${temp}/tmp${step}_merged_pc.txt ${pcs}/mega_b37_pcs_merged.txt
