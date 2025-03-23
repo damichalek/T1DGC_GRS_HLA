@@ -1,0 +1,68 @@
+#!/bin/bash
+
+echo "Association analysis of (AMR and SAS) HLA region for imputed ImmunoChip data (MAF > 0.005 and R2 > 0.5), Jan 23, 2024, by Dominika Michalek"
+
+PLINK=plink1.9
+KING=king
+logfile=assoc.log
+date > $logfile
+
+imp=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/Imputation
+pc=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/PCA/PCs
+temp=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/association_analysis/Temp_AMR
+script=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/Rscripts
+
+# Updated version of awk/gawk 5.2
+awkPath=/mnt/t1/local/bin/
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Logistic regression (5 PCs) MAC > 20
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=1
+
+for anc in AMR SAS; do
+	$PLINK --bfile $imp/Filtered_${anc}/chr6.dose.filtered --logistic hide-covar beta --ci 0.95 --covar $pc/mega_b37_pcs_${anc}.txt --covar-name PC1-PC5 --mac 20 --out $temp/tmp${step}_chr6_${anc} &>> $logfile
+done
+
+# substitute multiple spaces with single tabs
+for anc in AMR SAS; do
+	cat $temp/tmp${step}_chr6_${anc}.assoc.logistic | tr -s ' ' '\t' > $temp/tmp${step}_chr6_${anc}_assoc_logistic.txt
+	awk '{print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' $temp/tmp${step}_chr6_${anc}_assoc_logistic.txt | sed "s/ /\t/g" > $temp/assoc_logistic_chr6_${anc}.txt
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Separate logistic regression results (SNPs, AA and HLA)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=2
+
+# HLA genes
+for anc in AMR SAS;	 do
+	awk 'NR == 1' $temp/assoc_logistic_chr6_${anc}.txt > $temp/assoc_logistic_chr6_HLA_${anc}.txt
+	awk '$2 ~ /HLA/ {print $0}' $temp/assoc_logistic_chr6_${anc}.txt >> $temp/assoc_logistic_chr6_HLA_${anc}.txt
+done
+
+# Amino-acids (AA)
+for anc in AMR SAS;	 do
+	awk 'NR == 1' $temp/assoc_logistic_chr6_${anc}.txt > $temp/assoc_logistic_chr6_AA_${anc}.txt
+	awk '$2 ~ /AA/ {print $0}' $temp/assoc_logistic_chr6_${anc}.txt >> $temp/assoc_logistic_chr6_AA_${anc}.txt
+done
+
+# SNPs
+for anc in AMR SAS; do
+	awk 'NR == 1' $temp/assoc_logistic_chr6_${anc}.txt > $temp/assoc_logistic_chr6_SNP_${anc}.txt
+	awk '$2 ~ /rs/ {print $0}' $temp/assoc_logistic_chr6_${anc}.txt >> $temp/assoc_logistic_chr6_SNP_${anc}.txt
+	awk '$2 ~ /SNPS/ {print $0}' $temp/assoc_logistic_chr6_${anc}.txt >> $temp/assoc_logistic_chr6_SNP_${anc}.txt
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Prepare files for HLA-TAPAS (HLAManhattan)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=3
+
+# for plots only
+for anc in AMR SAS; do
+	cp $temp/assoc_logistic_chr6_${anc}.txt $temp/HLAManhattan_chr6_${anc}.assoc.logistic
+done

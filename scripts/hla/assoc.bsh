@@ -1,0 +1,85 @@
+#!/bin/bash
+
+echo "Association analysis of HLA region for imputed ImmunoChip data (MAF > 0.005 and R2 > 0.5), Oct 2, 2023, by Dominika Michalek"
+
+PLINK=plink1.9
+KING=king
+logfile=assoc.log
+date > $logfile
+
+imp=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/Imputation
+pc=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/PCA/PCs
+temp=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/association_analysis/Temp
+script=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA/HLA/Rscripts
+
+# Updated version of awk/gawk 5.2
+awkPath=/mnt/t1/local/bin/
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Logistic regression (5 PCs) MAC > 20
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=1
+
+for anc in AFR AMR EAS EUR FIN; do
+	$PLINK --bfile $imp/Filtered_${anc}/chr6.dose.filtered --logistic hide-covar beta --ci 0.95 --covar $pc/mega_b37_pcs_${anc}.txt --covar-name PC1-PC5 --mac 20 --out $temp/tmp${step}_chr6_${anc} &>> $logfile
+done
+
+# substitute multiple spaces with single tabs
+for anc in AFR AMR EAS EUR FIN; do
+	cat $temp/tmp${step}_chr6_${anc}.assoc.logistic | tr -s ' ' '\t' > $temp/tmp${step}_chr6_${anc}_assoc_logistic.txt
+	awk '{print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' $temp/tmp${step}_chr6_${anc}_assoc_logistic.txt | sed "s/ /\t/g" > $temp/assoc_logistic_chr6_${anc}.txt
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Separate logistic regression results (SNPs, AA and HLA)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=2
+
+# HLA genes
+for anc in AFR AMR EAS EUR FIN;	 do
+	awk 'NR == 1' $temp/assoc_logistic_chr6_${anc}.txt > $temp/assoc_logistic_chr6_HLA_${anc}.txt
+	awk '$2 ~ /HLA/ {print $0}' $temp/assoc_logistic_chr6_${anc}.txt >> $temp/assoc_logistic_chr6_HLA_${anc}.txt
+done
+
+# Amino-acids (AA)
+for anc in AFR AMR EAS EUR FIN;	 do
+	awk 'NR == 1' $temp/assoc_logistic_chr6_${anc}.txt > $temp/assoc_logistic_chr6_AA_${anc}.txt
+	awk '$2 ~ /AA/ {print $0}' $temp/assoc_logistic_chr6_${anc}.txt >> $temp/assoc_logistic_chr6_AA_${anc}.txt
+done
+
+# SNPs
+for anc in AFR AMR EAS EUR FIN; do
+	awk 'NR == 1' $temp/assoc_logistic_chr6_${anc}.txt > $temp/assoc_logistic_chr6_SNP_${anc}.txt
+	awk '$2 ~ /rs/ {print $0}' $temp/assoc_logistic_chr6_${anc}.txt >> $temp/assoc_logistic_chr6_SNP_${anc}.txt
+	awk '$2 ~ /SNPS/ {print $0}' $temp/assoc_logistic_chr6_${anc}.txt >> $temp/assoc_logistic_chr6_SNP_${anc}.txt
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Calculate p-value for SNPs, AA and HLA with p-value = 0 (EUR)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=3
+
+Rscript $script/calculate_pvalue_AA.R
+Rscript $script/calculate_pvalue_HLA.R
+Rscript $script/calculate_pvalue_SNP.R
+Rscript $script/calculate_pvalue.R
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Prepare files for HLA-TAPAS (HLAManhattan)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=4
+
+# for plots only
+
+# EUR - if P value < 1E-318, change it to 1E-318
+awk 'NR == 1' $temp/assoc_logistic_chr6_EUR_p.txt > $temp/HLAManhattan_chr6_EUR.assoc.logistic
+awk 'NR>1' $temp/assoc_logistic_chr6_EUR_p.txt | $awkPath/awk -M -v PREC=100 '{if($12>=1E-318){print $0}else{print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1E-318}}' | sed "s/ /\t/g" >> $temp/HLAManhattan_chr6_EUR.assoc.logistic
+
+
+for anc in AFR AMR EAS FIN; do
+	cp $temp/assoc_logistic_chr6_${anc}.txt $temp/HLAManhattan_chr6_${anc}.assoc.logistic
+done
