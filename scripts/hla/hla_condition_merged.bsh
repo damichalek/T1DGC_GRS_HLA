@@ -1,0 +1,79 @@
+#!/bin/bash
+
+echo "Conditional analysis of HLA region for merged (AFR, AMR, EUR, FIN) imputed ImmunoChip data (MAF > 0.005 and R2 > 0.5), Jan 03, 2025, by Dominika Michalek"
+
+PLINK=plink
+logfile=hla_condition_merged.log
+date > $logfile
+
+main=/ceph/CPHG/T1DGC/USERS/dam8mt/data/MEGA
+imp=${main}/HLA/Imputation/Filtered_merged_pheno
+input=${main}/HLA/association_analysis_merged/conditional_analysis/input
+output=${main}/HLA/association_analysis_merged/conditional_analysis/output/all
+assoc=${main}/HLA/association_analysis_merged/all
+pc=${main}/PCA/PCs_merged
+script=${main}/HLA/Rscripts
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Prepare list of AA, HLA, SNP to use in conditional analysis
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=1
+
+# make a list of AA markers with only one amino-acid, "x" (stop codon), "." and bi-allelic amino-acid at the end
+# $2 ~ /_[a-z A-Z]{1}$/ -> anything in column 2 that ends with _(any one letter) -> amino_acid + stop codon
+# $2 ~ /_\.$/ -> anything in column 2 that ends with _.
+# $2 ~ /[[:digit:]]$/ -> anything in column 2 that ends with a digit -> bi-allelic amino-acid
+awk '$2 ~ /_[a-z A-Z]{1}$/ || $2 ~ /_\.$/ || $2 ~ /[[:digit:]]$/ {print $2}' ${imp}/chr6.dose.filtered.AA.bim > ${input}/merged_keep_AA.txt
+
+# make a list of HLA markers with 4 digits (2 fields)
+# $2 ~ /:[[:digit:]]{2}.*$/ -> anything in column 2 that ends with :(2 digits) and zero or more occurrences of any single character -> 4 digit allele
+awk '$2 ~ /:[[:digit:]]{2}.*$/ {print $2}' ${imp}/chr6.dose.filtered.HLA.bim > ${input}/merged_keep_HLA.txt
+
+# make a list of SNP markers (rsID)
+awk '$2 ~ /rs/ {print $2}' ${imp}/chr6.dose.filtered.SNP.bim > ${input}/merged_keep_SNP.txt
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Prepare independent AA, HLA and SNP files and condition lists
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=2
+
+# Independent AA, HLA, SNP
+for val in AA HLA SNP; do
+awk 'NR == 1' ${assoc}/assoc_logistic_chr6_${val}_merged_p.txt > ${output}/merged_conditional_analysis_${val}.txt
+sort -g -k 12 ${assoc}/assoc_logistic_chr6_${val}_merged_p.txt | awk 'NR == 2' >> ${output}/merged_conditional_analysis_${val}.txt
+done
+
+# Condition list (AA, HLA, SNP)
+for val in AA HLA SNP; do
+awk 'NR == 2 {print $2}' ${output}/merged_conditional_analysis_${val}.txt > ${input}/merged_condition_list_${val}.txt
+done
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Run conditional analysis (AA, HLA, SNP)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+step=3
+
+for val in AA HLA SNP; do
+for i in {1..47}; do
+$PLINK --bfile ${imp}/chr6.dose.filtered.${val} --logistic hide-covar beta \
+    --extract ${input}/merged_keep_${val}.txt \
+  	--maf 0.005 \
+  	--mac 20 \
+  	--ci 0.95 \
+  	--covar ${pc}/mega_b37_pcs_merged.txt \
+  	--covar-name PC1-PC5 \
+  	--condition-list ${input}/merged_condition_list_${val}.txt \
+  	--out ${output}/merged_chr6_${val}_condition${i} &>> $logfile
+
+Rscript ${script}/calc_p_condition_merged.R ${val} ${i}
+
+# add the most significant AA, HLA, SNP result to the "Indepented AA, HLA, SNP"
+sort -g -k 12 ${output}/merged_chr6_${val}_condition_p${i}.assoc.logistic | grep -v "NA" | awk 'NR == 2 {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' | sed "s/ /\t/g" >> ${output}/merged_conditional_analysis_${val}.txt
+
+# add the most significant AA, HLA, SNP to the "Condition list (AA, HLA, SNP)"
+sort -g -k 12 ${output}/merged_chr6_${val}_condition_p${i}.assoc.logistic | grep -v "NA"  | awk 'NR == 2 {print $2}' >> ${input}/merged_condition_list_${val}.txt
+done
+done
