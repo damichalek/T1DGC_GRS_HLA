@@ -47,11 +47,11 @@ Rscript mega_pca_sex_merged.R
 
 2. Filter HLA imputation results
 ```bash
-bash HLA_filter_imp.bsh
-bash HLA_filter_imp_AMR.bsh # after SAS separation from AMR
+bash hla_filter_imp.bsh
+bash hla_filter_imp_AMR.bsh # after SAS separation from AMR
 ```
 
 3. Remove individuals with missing phenotype information
 ```bash
-bash HLA_remove_missing_pheno.bsh
+bash hla_remove_missing_pheno.bsh
 ```
