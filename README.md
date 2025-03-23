@@ -75,3 +75,5 @@ bash assoc_merged.bsh
 bash hla_condition_${anc}.bsh
 bash hla_condition_merged.bsh
 ```
+
+## Genetic Risk Score (GRS) prediction
