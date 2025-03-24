@@ -83,4 +83,12 @@ bash hla_condition_merged.bsh
 bash grs.bsh
 bash grs_AMR.bsh # after SAS separation from AMR
 bash grs_merged.bsh
+
+# plot GRS distribution (raincloud plot)
+Rscript GRS_HLA_raincloud_plot_merged.R
+Rscript GRS_SNP_raincloud_plot_merged.R
+
+# plot ROC curves
+Rscript auc_grs_plot_hla.R
+Rscript auc_grs_plot_snp.R
 ```
