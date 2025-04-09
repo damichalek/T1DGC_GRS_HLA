@@ -63,7 +63,7 @@ echo "12 109500000 112000000" >> $pca/high_LD_regions.txt
 echo "20 32000000 34500000" >> $pca/high_LD_regions.txt
 
 # add label for each region to ld region file (required format for plink "--exclude range" option)
-awk '{print $1, $2, $3, "R"$NR}' $pca/high_LD_regions.txt > $pca/high_LD_regions_range.txt
+awk '{print $1, $2, $3, "R" NR}' $pca/high_LD_regions.txt > $pca/high_LD_regions_range.txt
 
 for anc in AMR SAS; do
 	$PLINK --bfile $data/${anc}/mega_b37-updated-unrelated-${anc}_cluster --exclude range $pca/high_LD_regions_range.txt --make-bed --out $temp/tmp${step}_${anc}_without_highLD &>> $logfile
